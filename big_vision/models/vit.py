@@ -127,6 +127,7 @@ class MAPHead(nn.Module):
   """Multihead Attention Pooling."""
   mlp_dim: Optional[int] = None  # Defaults to 4x input dim
   num_heads: int = 12
+  buggy: bool = False
 
   @nn.compact
   def __call__(self, x):
@@ -142,6 +143,8 @@ class MAPHead(nn.Module):
 
     # TODO: dropout on head?
     y = nn.LayerNorm()(x)
+    if self.buggy:
+      x = y
     x = x + MlpBlock(mlp_dim=self.mlp_dim)(y)
     return x[:, 0]
 
@@ -196,6 +199,9 @@ class _Model(nn.Module):
     if self.pool_type == "map":
       x = out["head_input"] = MAPHead(
           num_heads=self.num_heads, mlp_dim=self.mlp_dim)(x)
+    elif self.pool_type == "map_buggy":
+      x = out["head_input"] = MAPHead(
+          num_heads=self.num_heads, mlp_dim=self.mlp_dim, buggy=True)(x)
     elif self.pool_type == "gap":
       x = out["head_input"] = jnp.mean(x, axis=1)
     elif self.pool_type == "0":
