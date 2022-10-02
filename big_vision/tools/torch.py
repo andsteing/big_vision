@@ -265,10 +265,12 @@ class TwoTowers(nn.Module):
 
   def __init__(self, *, image, text, out_dim):
     super().__init__()
+    image = {**image}
     variant = image.pop('variant', None)
     if variant:
       image = {**_IMAGE_VARIANTS[variant], **image}
     self.img = ViT(out_dim[0], **image)
+    text = {**text}
     variant = text.pop('variant', None)
     if variant:
       text = {**_TEXT_VARIANTS[variant], **text}
