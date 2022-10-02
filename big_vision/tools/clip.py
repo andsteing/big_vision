@@ -92,7 +92,7 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
   download_root = download_root or os.path.expanduser("~/.cache/lit")
   os.makedirs(download_root, exist_ok=True)
   url, config = _MODELS[name]
-  path = os.path.join(download_root, os.path.basename(url))
+  path = os.path.join(download_root, f'{name}.npz')
   if not os.path.exists(path):
     logging.info('Downloading %s to %s', url, path)
     gfile.copy(url, path)
