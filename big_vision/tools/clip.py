@@ -39,6 +39,7 @@ class LiT(nn.Module):
   def __init__(self, lit_model):
     super().__init__()
     self.lit_model = lit_model
+    self.visual = lit_model.img
 
   def initialize_parameters(self):
     raise NotImplementedError
@@ -50,7 +51,7 @@ class LiT(nn.Module):
     return self.lit_model.img.embedding.weight.dtype
 
   def encode_image(self, image):
-    return self.lit_model.img(image.type(self.dtype))
+    return self.visual(image.type(self.dtype))
 
   def encode_text(self, text):
     return self.lit_model.txt(text)
