@@ -65,7 +65,7 @@ _MODELS = {
 }
 
 _TOKENIZER_MODELS = {
-  'lit_jft_e14g': 'gs://big_vision_eu/lit_private/lit_jft_e14g//argus_dedup_v1.2_288M32k.model',
+  'lit_jft_e14g': 'gs://big_vision_eu/lit_private/lit_jft_e14g/argus_dedup_v1.2_288M32k.model',
 }
 
 
