@@ -137,7 +137,7 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
   model = bv_torch.TwoTowers(**config)
   with open(path, 'rb') as f:
     w = _LoggingDict(**np.load(path))
-  model.load(w, prefix='params/')
+  model.load(w, prefix='params/' if next(iter(w)).startswith('params/') else '')
   unused = set(w).difference(w.accessed)
   assert not unused, unused
   overused = {k: v for k, v in w.accessed.items() if v > 1}
