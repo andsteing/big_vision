@@ -18,7 +18,7 @@ import torch
 from torch import nn
 import torchvision
 
-_tokenize = None
+_tokenizers = {}
 
 # download paths & configs
 _MODELS = {
@@ -29,7 +29,43 @@ _MODELS = {
             text=dict(variant='B'),
             out_dim=[0, 768],
         ),
-    )
+    ),
+    'lit_jft_b16b': (
+        'gs://big_vision_eu/lit_private/lit_jft_b16b/checkpoint.npz',
+        dict(
+            image=dict(variant='B/16', pool_type='map_buggy'),
+            text=dict(variant='B'),
+            out_dim=[0, 768],
+        ),
+    ),
+    'lit_jft_l16l': (
+        'gs://big_vision_eu/lit_private/lit_jft_l16l/checkpoint.npz',
+        dict(
+            image=dict(variant='L/16', pool_type='map_buggy'),
+            text=dict(variant='L'),
+            out_dim=[0, 1024],
+        ),
+    ),
+    'lit_jft_g14g': (
+        'gs://big_vision_eu/lit_private/lit_jft_g14g/checkpoint.npz',
+        dict(
+            image=dict(variant='g/14', pool_type='map'),
+            text=dict(variant='g'),
+            out_dim=[0, 1408],
+        ),
+    ),
+    'lit_jft_e14g': (
+        'gs://big_vision_eu/lit_private/lit_jft_e14g/checkpoint.npz',
+        dict(
+            image=dict(variant='e/14', pool_type='map'),
+            text=dict(variant='g'),
+            out_dim=[0, 1792],
+        ),
+    ),
+}
+
+_TOKENIZER_MODELS = {
+  'lit_jft_e14g': 'gs://big_vision_eu/lit_private/lit_jft_e14g//argus_dedup_v1.2_288M32k.model',
 }
 
 
@@ -137,19 +173,25 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
   return LiT(model), pp_img
 
 
-def tokenize(texts: Union[str, List[str]], context_length: int = 16, truncate: bool = True) -> Union[torch.IntTensor, torch.LongTensor]:
+def tokenize(texts: Union[str, List[str]], context_length: int = 16, truncate: bool = True, name: str = '') -> Union[torch.IntTensor, torch.LongTensor]:
   if not truncate:
     warnings.warn('Ignoring truncate=False!')
   if isinstance(texts, str):
       texts = [texts]
   global _tokenize
-  if _tokenize is None:
+  if name not in _TOKENIZER_MODELS:
+    name = None
+  if name not in _tokenizers:
+    kw = {}
+    if name in _TOKENIZER_MODELS:
+      kw['model'] = _TOKENIZER_MODELS[name]
     _tokenize = ops_text.get_pp_tokenize(
         max_len=context_length,
         eos='sticky',
         inkey='text',
         outkey='tokens',
         pad_value=1,
+        **kw,
     )
   
   dtype = torch.int

@@ -250,12 +250,51 @@ _IMAGE_VARIANTS = {
     'B/32': dict(
         patch_size=32,
     ),
+    'B/16': dict(),
+    'L/16': dict(
+        width=1024,
+        depth=24,
+        num_heads=16,
+    ),
+    'L/16': dict(
+        width=1024,
+        depth=24,
+        num_heads=16,
+    ),
+    'g/14': dict(
+        patch_size=14,
+        img_size=280,
+        width=1408,
+        depth=40,
+        mlp_dim=6144,
+        num_heads=16,
+    ),
+    'e/14': dict(
+        patch_size=14,
+        img_size=280,
+        width=1792,
+        depth=56,
+        mlp_dim=15360,
+        num_heads=16,
+    ),
 }
 _TEXT_VARIANTS = {
     'B': dict(
         width=768,
         num_heads=12,
         mlp_dim=0,
+    ),
+    'L': dict(
+        width=1024,
+        depth=24,
+        num_heads=16,
+        mlp_dim=0,
+    ),
+    'g': dict(
+        width=1408,
+        depth=40,
+        mlp_dim=6144,
+        num_heads=16,
     ),
 }
 
