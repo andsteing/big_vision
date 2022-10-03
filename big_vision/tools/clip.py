@@ -185,7 +185,7 @@ def tokenize(texts: Union[str, List[str]], context_length: int = 16, truncate: b
     kw = {}
     if name in _TOKENIZER_MODELS:
       kw['model'] = _TOKENIZER_MODELS[name]
-    _tokenize = ops_text.get_pp_tokenize(
+    _tokenizer[name] = ops_text.get_pp_tokenize(
         max_len=context_length,
         eos='sticky',
         inkey='text',
@@ -193,12 +193,13 @@ def tokenize(texts: Union[str, List[str]], context_length: int = 16, truncate: b
         pad_value=1,
         **kw,
     )
+  tokenizer = _tokenizer[name]
   
   dtype = torch.int
   if packaging.version.parse(torch.__version__) < packaging.version.parse("1.8.0"):
     dtype = torch.long
   result = torch.zeros(len(texts), context_length, dtype=dtype)
   for i, text in enumerate(texts):
-    result[i, :] = torch.tensor(_tokenize({'text': text})['tokens'].numpy(), dtype=dtype)
+    result[i, :] = torch.tensor(tokenizer({'text': text})['tokens'].numpy(), dtype=dtype)
 
   return result
