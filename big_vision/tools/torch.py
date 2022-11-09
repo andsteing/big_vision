@@ -180,6 +180,8 @@ class ViT(nn.Module):
     self.pool_type = pool_type
     if pool_type in ('map', 'map_buggy'):
       self.MAPHead_0 = MAPHead(width, mlp_dim=mlp_dim, num_heads=num_heads, buggy=pool_type == 'map_buggy')
+    elif pool_type == 'tok':
+      self.cls = nn.Parameter(torch.zeros(1, 1, width))
     elif pool_type != 'gap':
       raise ValueError(pool_type)
     if num_classes:
@@ -188,13 +190,17 @@ class ViT(nn.Module):
   def forward(self, x):
     x = self.embedding(x).flatten(2).transpose(1, 2)
     x += self.pos_embedding
+    if self.pool_type == 'tok':
+      x = torch.concat([self.cls, x], 1)
     x = self.Transformer(x)
     if hasattr(self, 'MAPHead_0'):
       x = self.MAPHead_0(x)
-    if hasattr(self, 'head'):
-      x = self.head(x)
     if self.pool_type == 'gap':
       x = x.mean(axis=1)
+    if self.pool_type == 'tok':
+      x = x[:, 0, :]
+    if hasattr(self, 'head'):
+      x = self.head(x)
     return x
 
   @torch.no_grad()
@@ -205,6 +211,8 @@ class ViT(nn.Module):
     self.Transformer.load(w, prefix=f'{prefix}Transformer/')
     if hasattr(self, 'MAPHead_0'):
       self.MAPHead_0.load(w, prefix=f'{prefix}MAPHead_0/')
+    if self.pool_type == 'tok':
+      self.cls.copy_(_n2p(w[f'{prefix}cls'], t=False))
     if hasattr(self, 'head'):
       self.head.weight.copy_(_n2p(w[f'{prefix}head/kernel']))
       self.head.bias.copy_(_n2p(w[f'{prefix}head/bias']))
