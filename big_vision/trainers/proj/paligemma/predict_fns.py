@@ -68,18 +68,19 @@ def _image_avg_repr(train_state, batch, *, model, key="img/pre_logits"):
 
 def _decode_with_logp(
     train_state, batch, *, model, devices, max_decode_len, eos_token,
-    best_of_n=1, sampler="greedy", replicate_out=False, eos_look_behind=0):
+    best_of_n=1, sampler="greedy", eos_look_behind=0):
   """Sample token continuations to the input sequences."""
   mesh = jax.sharding.Mesh(devices, ("devices",))
   replicate_sharding = jax.sharding.NamedSharding(mesh, P())
+  bs_shardable = len(batch["image"]) % jax.device_count() == 0
   out_sharding = jax.sharding.NamedSharding(
-      mesh, P() if replicate_out else P("devices")
+      mesh, P("devices") if bs_shardable else P()
   )
 
   # Prefill the model cache and generate logits for first token.
   logits, cache = jax.jit(
       _prefill_cache,
-      out_shardings=out_sharding,
+      out_shardings=(None, out_sharding),
       static_argnames=("model", "max_decode_len"),
   )(
       train_state["params"],
@@ -114,6 +115,7 @@ def _decode_with_logp(
   extend_cache = jax.jit(
       _extend_cache,
       donate_argnums=1,
+      out_shardings=(None, out_sharding),
       static_argnames=("model",),
   )
 
@@ -297,18 +299,19 @@ def _nucleus_sampling(p: float, t: float = 1.0, *, logits, rng):
 
 def _beam_decode(train_state, batch, *,
                  model, devices, max_decode_len,
-                 eos_token, beam_size, replicate_out=False):
+                 eos_token, beam_size):
   """Beam search (greedy/top-k exploration)."""
   mesh = jax.sharding.Mesh(devices, ("devices",))
   replicate_sharding = jax.sharding.NamedSharding(mesh, P())
+  bs_shardable = len(batch["image"]) % jax.device_count() == 0
   out_sharding = jax.sharding.NamedSharding(
-      mesh, P() if replicate_out else P("devices")
+      mesh, P("devices") if bs_shardable else P()
   )
 
   # Prefill the model cache and generate logits for first token.
   logits, cache = jax.jit(
       _prefill_cache,
-      out_shardings=out_sharding,
+      out_shardings=(None, out_sharding),
       static_argnames=("model", "max_decode_len"),
   )(
       train_state["params"],
@@ -327,6 +330,8 @@ def _beam_decode(train_state, batch, *,
 
   beam_sample_output = jax.jit(
       _beam_sample_output,
+      donate_argnums=2,
+      out_shardings=(None, None, out_sharding),
       static_argnames=("max_decode_len", "beam_size", "eos_token"),
   )
   beam_early_stop = jax.jit(
@@ -337,6 +342,7 @@ def _beam_decode(train_state, batch, *,
   extend_cache = jax.jit(
       _extend_cache,
       donate_argnums=1,
+      out_shardings=(None, out_sharding),
       static_argnames=("model",),
   )
 
