@@ -142,6 +142,22 @@ def get_config(variant):
             remat_policy="nothing_saveable",
         )
     )
+  if variant == "gemma_test":
+    return ml_collections.ConfigDict(
+        dict(
+            variant=variant,
+            width=16,
+            depth=4,
+            mlp_dim=64,
+            num_heads=2,
+            num_kv_heads=1,
+            head_dim=8,
+            norm_eps=1e-6,
+            vocab_size=32,
+            scan=True,
+            remat_policy="nothing_saveable",
+        )
+    )
   raise ValueError(f"Unknown variant: {variant}")
 
 
