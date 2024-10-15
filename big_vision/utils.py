@@ -586,6 +586,28 @@ class Chrono:
 chrono = Chrono()
 
 
+def log_memory(measure):
+  """Log a bunch of memory-related measurements."""
+  try:
+    import psutil
+  except ImportError:
+    psutil = None
+
+  if psutil is not None:
+    # Note that total != available + used, see psutil docs.
+    vmem = psutil.virtual_memory()
+    measure("y/hostmem/total", vmem.total)
+    measure("y/hostmem/available", vmem.available)
+    measure("y/hostmem/used", vmem.used)
+
+  # We show only device 0 and 1 to avoid spam. The reason to show two and not
+  # just one, if multiple are available, is because a frequent mistake is to
+  # create arrays on the default device, which is device 0.
+  for i, d in zip([0, 1], jax.local_devices()):
+    for k, v in (d.memory_stats() or {}).items():
+      measure(f"y/devmem/dev{i}/{k}", v)
+
+
 def _traverse_with_names(tree, with_inner_nodes=False):
   """Traverses nested dicts/dataclasses and emits (leaf_name, leaf_val)."""
   if dataclasses.is_dataclass(tree):
