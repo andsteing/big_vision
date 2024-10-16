@@ -35,6 +35,7 @@ import einops
 import flax
 import flax.jax_utils as flax_utils
 import jax
+from jax.experimental import mesh_utils
 from jax.experimental.array_serialization import serialization as array_serial
 import jax.numpy as jnp
 import ml_collections as mlc
@@ -1447,3 +1448,26 @@ def jit_cpu(**extra_kwargs):
       return jax.jit(fun, **extra_kwargs, out_shardings=sh)(*args, **kwargs)
     return _wrapped
   return _decorator
+
+
+def create_device_mesh(
+    config_mesh,
+    *,
+    allow_split_physical_axes=False,
+):
+  """Returns a JAX device mesh.
+
+  Args:
+    config_mesh: A list of tuples of (axis_name, axis_size). It is advised to
+      sort the axis in increasing order of network communication intensity.
+    allow_split_physical_axes: Whether to allow splitting physical axes.
+  """
+  devices = jax.devices()
+  mesh_axes, mesh_size = tuple(zip(*config_mesh))
+  # Because jax.utils do not support `-1` shape size.
+  mesh_size = np.array(devices).reshape(mesh_size).shape
+  device_mesh = mesh_utils.create_device_mesh(
+      mesh_size,
+      devices=devices,
+      allow_split_physical_axes=allow_split_physical_axes)
+  return jax.sharding.Mesh(device_mesh, mesh_axes)
