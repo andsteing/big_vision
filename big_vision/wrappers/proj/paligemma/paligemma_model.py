@@ -16,23 +16,22 @@
 
 Synopsis::
 
+  import PIL.Image
+  img = PIL.Image.open('img.jpg') # !wget -O img.jpg https://picsum.photos/800
   from big_vision.wrappers.proj.paligemma import paligemma_model as model_lib
-
   config = model_lib.get_config('./pt_2b_224.b16.npz')
+
   model, params_cpu = model_lib.load_model(config)
   params = model.shard_params(params_cpu)
 
-  it = tfds.load('coco_captions', split='val').as_numpy_iterator()
-  b = next(it)
-
-  batch = model.prepare_batch([b['image']], ['caption en'])
+  batch = model.prepare_batch([img], ['caption en'])
   batch = model.shard_batch(batch)
   tokens = model.generate(params, batch)
   texts = model.tokenizer.to_str(tokens)
   print(texts)
 
   batch2 = model.prepare_batch(
-      [b['image']] * len(texts), ['caption en'] * len(texts), texts)
+      [img] * len(texts), ['caption en'] * len(texts), texts)
   batch2 = model.shard_batch(batch2)
   scores = model.score(params, batch2)
   print(scores)
@@ -98,8 +97,9 @@ def _get_sharding_rules():
   return [('act_batch', ('devices',))]
 
 
-def _init_dummy(path, tokenizer_spec, vocab_size):
+def _init_dummy(path, tokenizer_spec, vocab_size, llm_variant):
   """Returns a small dummy model that can be run on CPU."""
+  del llm_variant
   assert path == DUMMY_MODEL, path
   tok = tokenizer.get_tokenizer(tokenizer_spec)
   config = ml_collections.FrozenConfigDict(dict(
@@ -122,13 +122,13 @@ def _init_dummy(path, tokenizer_spec, vocab_size):
   return model, params_cpu, predict_fns.get_all(model), tok
 
 
-def _load(path, tokenizer_spec, vocab_size):
+def _load(path, tokenizer_spec, vocab_size, llm_variant):
   """Loads model, params, decode functions and tokenizer."""
   tok = tokenizer.get_tokenizer(tokenizer_spec)
 
   config = ml_collections.FrozenConfigDict(dict(
       llm_model='proj.paligemma.gemma_bv',
-      llm=dict(vocab_size=vocab_size, variant='gemma_2b'),
+      llm=dict(vocab_size=vocab_size, variant=llm_variant),
       img=dict(variant=f'So400m/{_PATCH_SIZE}', pool_type='none', scan=True),
   ))
   model = paligemma.Model(**config)
@@ -189,7 +189,7 @@ def _get_pp_fn(res, tokenizer_spec, text_len):
               f'resize({res}, antialias=True)|value_range(-1, 1)',
               f"tok(key='prefix', bos='yes', model='{tokenizer_spec}')",
               f"tok(key='septok', text='\\n', model='{tokenizer_spec}')",
-              f"tok(key='suffix', model='{tokenizer_spec}')",
+              f"tok(key='suffix', eos='yes', model='{tokenizer_spec}')",
               (
                   # pyformat: disable
                   'masked_concat(["prefix", "septok", "suffix"],'
@@ -233,7 +233,7 @@ def _prepare_batch(
   if suffixes is None:
     suffixes = [''] * len(prefixes)
   assert len(prefixes) == len(suffixes) == len(images), (
-      f'invalid lenghts: {len(prefixes)}, {len(suffixes)}, {len(images)}')
+      f'invalid lengths: {len(prefixes)}, {len(suffixes)}, {len(images)}')
   examples = [{'_mask': True, **pp_fn({
       'image': np.asarray(_pil2np(image)),
       'prefix': np.array(prefix),
@@ -271,7 +271,9 @@ class PaligemmaConfig:
   """Desribes a `big_vision` PaliGemma model."""
 
   ckpt: str
+  params_dtype: str | None
   res: int
+  llm_variant: str
   text_len: int
   tokenizer_spec: str
   vocab_size: int
@@ -481,7 +483,12 @@ def load_model(config: PaligemmaConfig) -> tuple[PaliGemmaModel, ParamsCpu]:
       path=config.ckpt,
       tokenizer_spec=config.tokenizer_spec,
       vocab_size=config.vocab_size,
+      llm_variant=config.llm_variant,
   )
+  if config.params_dtype:
+    params_cpu = jax.tree.map(
+        lambda x: x.astype(config.params_dtype), params_cpu
+    )
   del model
   return PaliGemmaModel(
       config=config,
@@ -492,17 +499,28 @@ def load_model(config: PaligemmaConfig) -> tuple[PaliGemmaModel, ParamsCpu]:
   ), params_cpu
 
 
-def _get_res(name, ckpt):
-  """Returns inferred resolution from checkpoint path or 224 by default."""
+_NAME_RE = re.compile(r'(\w+)(?:_(772m|2b|9b|27b))?_(224|448|896)(?:\..*)')
+
+
+@functools.cache
+def _infer_config(name, ckpt):
+  """Returns inferred config parameters from name / checkpoint."""
+  m = _NAME_RE.fullmatch(name)
+  assert m, name  # tested in caller
+  res = int(m.group(3))
+  llm_variant = f'gemma2_{m.group(2)}' if m.group(2) else 'gemma_2b'
+
   res_name = name.split('_')[-1]
   if res_name in ('224', '448', '896'):
-    return int(res_name)
+    res = int(res_name)
+
   ts_dir = None
   if tf.io.gfile.isdir(ckpt):
     ts_dir = ckpt
   elif tf.io.gfile.exists(f'{ckpt}-LAST'):
     num = tf.io.gfile.GFile(f'{ckpt}-LAST').read()
     ts_dir = f'{ckpt}-{num}'
+
   if ts_dir:
     posembed_zarr = f'{ts_dir}/params~img~pos_embedding/.zarray'
     if tf.io.gfile.exists(posembed_zarr):
@@ -510,14 +528,29 @@ def _get_res(name, ckpt):
       n = d['shape'][1]
       res_in_patches = int(n ** 0.5)
       assert res_in_patches * res_in_patches == n, n
-      return _PATCH_SIZE * res_in_patches
-  return 224  # sensible default
+      res = _PATCH_SIZE * res_in_patches
+    inputembed_zarr = f'{ts_dir}/params~llm~embedder~input_embedding/.zarray'
+    if tf.io.gfile.exists(inputembed_zarr):
+      d = json.load(tf.io.gfile.GFile(inputembed_zarr))
+      unused_vocab, width = d['shape']
+      llm_variant = {
+          1152: 'gemma2_772m',
+          2048: 'gemma_2b',
+          2304: 'gemma2_2b',
+          3584: 'gemma2_9b',
+          4608: 'gemma2_27b',
+      }[width]
+
+  return res, llm_variant
 
 
 def get_config(
     name_or_path: str,
     text_len: int = 256,
     sharding_strategy: ShardingStrategy = ShardingStrategy.FSDP,
+    params_dtype: str | None = None,
+    res: int | None = None,
+    llm_variant: str | None = None,
     tokenizer_spec: str = 'gemma(tokensets=("loc", "seg"))',
 ) -> PaligemmaConfig:
   """Returns config for model `name`."""
@@ -527,14 +560,21 @@ def get_config(
   else:
     if '/' in name_or_path:
       ckpt = name_or_path
-      name = ckpt.split('/')[-2]
+      name = ''
+      for name in ckpt.split('/')[::-1]:
+        if _NAME_RE.fullmatch(name):
+          break
+      if not _NAME_RE.fullmatch(name):
+        name = 'unknown_224'
     else:
       raise ValueError('Please provide full path containing "/".')
     vocab_size = 256_000 + 1024 + 128
 
   return PaligemmaConfig(
       ckpt=ckpt,
-      res=_get_res(name, ckpt),
+      params_dtype=params_dtype,
+      res=res or _infer_config(name, ckpt)[0],
+      llm_variant=llm_variant or _infer_config(name, ckpt)[1],
       text_len=text_len,
       tokenizer_spec=tokenizer_spec,
       vocab_size=vocab_size,
