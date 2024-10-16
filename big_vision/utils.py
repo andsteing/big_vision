@@ -990,7 +990,7 @@ def tsload(path, *, tree=None, shardings=None, regex=None):
   names_to_load = [os.path.join(path, name.replace("/", "~"))
                    for name in names_to_load]
   specs = [array_serial.get_tensorstore_spec(n) for n in names_to_load]
-  arrays = array_serial.run_deserialization(shardings, specs)
+  arrays = array_serial.run_deserialization(shardings, specs, concurrent_gb=64)
   return tree_def.unflatten(arrays)
 
 
